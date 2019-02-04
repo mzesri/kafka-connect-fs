@@ -1,6 +1,8 @@
 package com.github.mmolimar.kafka.connect.fs.file.reader;
 
 import com.github.mmolimar.kafka.connect.fs.file.Offset;
+import com.opencsv.CSVParser;
+import com.opencsv.CSVParserBuilder;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.kafka.connect.data.Schema;
@@ -29,9 +31,15 @@ public class DelimitedTextFileReader extends AbstractFileReader<DelimitedTextFil
     private String token;
     private String defaultValue;
     private boolean hasHeader;
+    private CSVParser parser;
+
 
     public DelimitedTextFileReader(FileSystem fs, Path filePath, Map<String, Object> config) throws IOException {
         super(fs, filePath, new DelimitedTxtToStruct(), config);
+
+        parser = new CSVParserBuilder()
+            .withSeparator(token.charAt(0))
+            .build();
 
         //mapping encoding for text file reader
         if (config.get(FILE_READER_DELIMITED_ENCODING) != null) {
@@ -43,7 +51,8 @@ public class DelimitedTextFileReader extends AbstractFileReader<DelimitedTextFil
         SchemaBuilder schemaBuilder = SchemaBuilder.struct();
         if (hasNext()) {
             String firstLine = inner.nextRecord().getValue();
-            String columns[] = firstLine.split(token);
+//            String columns[] = firstLine.split(token);
+            String columns[] = parser.parseLine(firstLine);
             IntStream.range(0, columns.length).forEach(index -> {
                 String columnName = hasHeader ? columns[index] : DEFAULT_COLUMN_NAME + "_" + ++index;
                 schemaBuilder.field(columnName, SchemaBuilder.STRING_SCHEMA);
@@ -72,8 +81,16 @@ public class DelimitedTextFileReader extends AbstractFileReader<DelimitedTextFil
     @Override
     protected DelimitedRecord nextRecord() {
         offset.inc();
-        String values[] = inner.nextRecord().getValue().split(token);
-        return new DelimitedRecord(schema, defaultValue != null ? fillNullValues(values) : values);
+//        String values[] = inner.nextRecord().getValue().split(token);
+//        return new DelimitedRecord(schema, defaultValue != null ? fillNullValues(values) : values);
+        String rawData = inner.nextRecord().getValue();
+        try {
+            String values[] = parser.parseLine(rawData);
+            return new DelimitedRecord(schema, defaultValue != null ? fillNullValues(values) : values);
+        }
+        catch(IOException e) {
+            throw new RuntimeException("Error parsing data: " + rawData);
+        }
     }
 
     private String[] fillNullValues(final String[] values) {
